@@ -1,15 +1,41 @@
 import os.path
 from shutil import copy, rmtree, copytree
-
-from graph_utils import MyDynamicDataset, Dynamic_relative_Feature, Dynamic_self_Feature
-from preprocessing import *
-from train_eval import *
-from model_32 import *
-from model_self_att import GT_self_attn
-
 from gensim.models import KeyedVectors
 
-# 왜 random seed 이렇게 많이 필요한지??
+from graph_utils import MyDynamicDataset, DynamicFeatures
+from graph_util_with_attention import AttentionDataset
+from preprocessing import *
+from train_eval import *
+
+from model_16_inter_intra_3_layers import GT16dim_3_modes
+from model_16_inter_intra_3_layers_4_heads import GT16dim_3_modes_4_heads
+from model_16_inter_intra_3_layers_8_heads import GT16dim_3_modes_8_heads
+from model_16_inter_intra_3_layers_16_heads import GT16dim_3_modes_16_heads
+from model_32 import *
+from model_64 import GT64dim
+from model_32_inter_intra_2_layers import GT32dim_2_modes
+from model_32_inter_intra_3_layers import GT32dim_3_modes
+from model_32_inter_intra_3_layers_4_heads import GT32dim_3_modes_4_heads
+from model_32_inter_intra_3_layers_8_heads import GT32dim_3_modes_8_heads
+from model_32_inter_intra_3_layers_16_heads import GT32dim_3_modes_16_heads
+from model_32_inter_intra_3_layers_2_linear import GT32dim_3_modes_2_linear
+from model_32_inter_intra_3_layers_3_dec_linear import GT32dim_3_modes_3_dec_linear
+from model_32_inter_intra_3_layers_4_dec_linear import GT32dim_3_modes_4_dec_linear
+from model_32_inter_intra_3_layers_5_dec_linear import GT32dim_3_modes_5_dec_linear
+from model_32_inter_intra_3_layers_6_dec_linear import GT32dim_3_modes_6_dec_linear
+from model_32_inter_intra_3_layers_7_dec_linear import GT32dim_3_modes_7_dec_linear
+from model_32_inter_intra_4_layers_6_dec_linear import GT32dim_4_modes_6_dec_linear
+from model_32_inter_intra_3_layers_new_attention import GT32dim_3_modes_new_attention
+from model_32_inter_intra_3_layers_new_6_linear import GT32dim_3_modes_new_6_linear
+from model_64_inter_intra_3_layers import GT64dim_3_modes
+from model_64_inter_intra_3_layers_4_heads import GT64dim_3_modes_4_heads
+from model_64_inter_intra_3_layers_8_heads import GT64dim_3_modes_8_heads
+from model_64_inter_intra_3_layers_16_heads import GT64dim_3_modes_16_heads
+from model_128_inter_intra_3_layers import GT128dim_3_modes
+from model_128_inter_intra_3_layers_4_heads import GT128dim_3_modes_4_heads
+from model_128_inter_intra_3_layers_8_heads import GT128dim_3_modes_8_heads
+from model_128_inter_intra_3_layers_16_heads import GT128dim_3_modes_16_heads
+
 torch.manual_seed(seed=1)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(seed=1)
@@ -17,23 +43,30 @@ random.seed(1)
 np.random.seed(1)
 
 # data_name = 'yahoo_music'
-data_name = 'flixster'
+# data_name = 'flixster'
 # data_name = 'douban'
-# data_name = 'ml_100k'
+data_name = 'ml_100k'
 # data_name = 'ml_1m'
 
 print('Using ' + data_name + ' dataset ...')
 home = os.path.expanduser('~')
-data_root = os.path.join(home, 'link_prediction/raw_data/')
+data_root = os.path.join(home, 'link_prediction/ALP/raw_data/')
 data_dir = data_root + data_name
 
 print('node embedding loading from ', data_name)
+# dimensions = 16
 dimensions = 32
-# walk_length = 80
-walk_length = 20
-# window_size = 10
-window_size = 5
-
+# dimensions = 64
+# dimensions = 128
+# walk_length = 100
+walk_length = 80
+# walk_length = 20
+window_size = 10
+# window_size = 5
+# window_size = 20
+print('walk length : ', walk_length)
+print('window size : ', window_size)
+print('embed dim. : ', dimensions)
 # top_wv = np.load(os.path.join(data_dir,
 top_wv = KeyedVectors.load(os.path.join(data_dir,
                                         'emb/top_' +
@@ -64,8 +97,19 @@ u_dict = re_u_dict
 re_v_dict = {}
 for k, v in v_dict.items():
     re_v_dict[int(k) - 10000] = v
+v_dict = re_v_dict
 u_wv_keys = np.array([int(i) for i in u_dict.keys()])
 v_wv_keys = np.array(list(re_v_dict.keys()))
+
+# when using rating_map for Flixster !
+# rating_map = {x: 2x for x in np.arange(0.5, 5.01, 0.5)}
+# rating_map = {x: math.ceil(int(x)) for x in np.arange(0.5, 5.01, 0.5)}
+# print('using rating_map : ', rating_map)
+
+# use_rating_dict = False
+use_rating_dict = True
+# use rating_dict only for classification since it needs continuous class range
+print('\nusing re-mapped rating dictionary? ', use_rating_dict)
 
 if data_name in ['yahoo_music', 'flixster', 'douban']:
     (
@@ -73,9 +117,12 @@ if data_name in ['yahoo_music', 'flixster', 'douban']:
         train_labels, train_u_indices, train_v_indices,
         val_labels, val_u_indices, val_v_indices,
         test_labels, test_u_indices, test_v_indices,
-        class_values, rating_dict
-    ) = load_data(data_name,
-                  u_wv_keys, v_wv_keys)
+        class_values
+    ) = load_data(data_dir,
+                  u_wv_keys, v_wv_keys,
+                  use_rating_dict)
+                # use_rating_dict=False)
+                # rating_map=rating_map)
 
 elif data_name == 'ml_100k':
     print("Using official MovieLens split u1.base/u1.test with 20% validation...")
@@ -85,8 +132,9 @@ elif data_name == 'ml_100k':
         val_labels, val_u_indices, val_v_indices,
         test_labels, test_u_indices, test_v_indices, class_values
     ) = load_ml_100k(
-        data_name,
-        u_wv_keys, v_wv_keys
+        data_dir,
+        u_wv_keys, v_wv_keys,
+        use_rating_dict
     )
 else:
     (
@@ -95,12 +143,14 @@ else:
         val_labels, val_u_indices, val_v_indices,
         test_labels, test_u_indices, test_v_indices, class_values
     ) = load_ml_1m(
-        data_name,
+        data_dir,
         u_wv_keys, v_wv_keys,
+        use_rating_dict
     )
-print(class_values)  # sorted unique ratings values
+
+print('original target value', class_values)  # sorted unique (original) ratings values
 # flixster : [0.5 1.  1.5 2.  2.5 3.  3.5 4.  4.5 5. ]
-print('len(class_values) : ', len(class_values))
+print('# of target values : ', len(class_values))
 
 train_indices = (train_u_indices, train_v_indices)
 val_indices = (val_u_indices, val_v_indices)
@@ -123,16 +173,27 @@ if reprocess:
     if os.path.isdir('raw_data/{}/test'.format(*data_combo)):
         rmtree('raw_data/{}/test'.format(*data_combo))
 
-dataset_class = 'MyDynamicDataset'
-# dataset_class = 'Dynamic_relative_Feature'
-# dataset_class = 'Dynamic_self_Feature'
+# dataset_class = 'MyDynamicDataset'
+dataset_class = 'DynamicFeatures'
 # dataset_class = 'MyDataset'
+# dataset_class = 'AttentionDataset'
+print('using data class : ', dataset_class)
+
 hop = 1
 sample_ratio = 1.0
-max_nodes_per_hop = 50
+# max_nodes_per_hop = 50
+max_nodes_per_hop = 10000
+# max_nodes_per_hop = 1000
+# max_nodes_per_hop = 100
+print('max_nodes_per_hop : ', max_nodes_per_hop)
+
 regression = True
-label_predict = False
+# regression = False
+print('regression ? ', regression)
+
 max_train_num = None
+use_edge_feature = True
+print('use rating as the edge weight ? ', use_edge_feature)
 
 train_graphs = eval(dataset_class)(
     'raw_data/{}/train'.format(*data_combo),
@@ -143,10 +204,10 @@ train_graphs = eval(dataset_class)(
     sample_ratio,
     max_nodes_per_hop,
     regression,
-    label_predict,
     u_emb, v_emb,
     u_dict, re_v_dict,
     class_values,
+    use_edge_feature,
     max_num=max_train_num,
 )
 test_graphs = eval(dataset_class)(
@@ -158,10 +219,10 @@ test_graphs = eval(dataset_class)(
     sample_ratio,
     max_nodes_per_hop,
     regression,
-    label_predict,
     u_emb, v_emb,
     u_dict, re_v_dict,
     class_values,
+    use_edge_feature,
     max_num=max_train_num,
 )
 
@@ -176,10 +237,10 @@ if not testing:
         sample_ratio,
         max_nodes_per_hop,
         regression,
-        label_predict,
         u_emb, v_emb,
         u_dict, re_v_dict,
         class_values,
+        use_edge_feature,
         max_num=max_train_num,
     )
     test_graphs = val_graphs
@@ -188,16 +249,219 @@ if not testing:
 # train_graph 넘길 필요없음
 # train_multiple_epochs() 에서 넘기면
 # data_loader 가 feeding 시킴
-# model = GT_self_attn(
+
+# model = GT16dim(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     use_edge_feature=True,
+# )
+
+# model = GT16dim_3_modes(
 #     num_classes=len(class_values),
 #     regression=regression,
 # )
-model = GT32dim(
+
+# model = GT16dim_3_modes_4_heads(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
+# model = GT16dim_3_modes_8_heads(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
+# model = GT16dim_3_modes_16_heads(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
+# model = GT32dim(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     use_edge_feature=False,
+# )
+
+# model = GT32dim_2_modes(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
+# model = GT32dim_3_modes(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
+# model = GT32dim_3_modes_4_heads(
+#         num_classes=len(class_values),
+#         regression=regression,
+# )
+
+# model = GT32dim_3_modes_8_heads(
+#         num_classes=len(class_values),
+#         regression=regression,
+# )
+
+# model = GT32dim_3_modes_16_heads(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
+# model = GT32dim_3_modes_2_linear(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     num_heads=1,
+#     # num_heads=4,
+#     # num_heads=8,
+#     # num_heads=16,
+#     # dropout=True,
+#     dropout=False,
+# )
+
+# model = GT32dim_3_modes_3_dec_linear(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     # num_heads=1,
+#     # num_heads=4,
+#     # num_heads=8,
+#     num_heads=16,
+#     dropout=True,
+#     # dropout=False,
+# )
+
+# model = GT32dim_3_modes_4_dec_linear(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     num_heads=1,
+#     # num_heads=4,
+#     # num_heads=8,
+#     # num_heads=16,
+#     # dropout=True,
+#     dropout=False,
+# )
+
+# model = GT32dim_3_modes_5_dec_linear(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     num_heads=1,
+#     # num_heads=4,
+#     # num_heads=8,
+#     # num_heads=16,
+#     # dropout=True,
+#     dropout=False,
+# )
+
+# model = GT32dim_3_modes_6_dec_linear(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     # num_heads=1,
+#     # num_heads=4,
+#     num_heads=8,
+#     # num_heads=16,
+#     # dropout=True,
+#     dropout=False,
+# )
+
+# model = GT32dim_3_modes_7_dec_linear(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     # num_heads=1,
+#     # num_heads=4,
+#     # num_heads=8,
+#     num_heads=16,
+#     dropout=True,
+#     # dropout=False,
+# )
+
+# model = GT32dim_4_modes_6_dec_linear(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     # num_heads=1,
+#     # num_heads=4,
+#     num_heads=8,
+#     # num_heads=16,
+#     # dropout=True,
+#     dropout=False,
+# )
+
+# moved global_mean_pool in the last stage,
+# not in after the self.lin1() before
+model = GT32dim_3_modes_new_attention(
     num_classes=len(class_values),
     regression=regression,
+    # num_heads=1,
+    # num_heads=4,
+    num_heads=8,
+    # num_heads=16,
+    dropout=True,
+    # dropout=False,
 )
+#
+# model = GT32dim_3_modes_new_6_linear(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     # num_heads=1,
+#     # num_heads=4,
+#     num_heads=8,
+#     # num_heads=16,
+#     dropout=True,
+#     # dropout=False,
+# )
+
+# model = GT64dim_3_modes(
+#         num_classes=len(class_values),
+#         regression=regression,
+# )
+
+# model = GT64dim_3_modes_4_heads(
+#         num_classes=len(class_values),
+#         regression=regression,
+# )
+
+# model = GT64dim_3_modes_8_heads(
+#         num_classes=len(class_values),
+#         regression=regression,
+# )
+
+# model = GT64dim_3_modes_16_heads(
+#         num_classes=len(class_values),
+#         regression=regression,
+# )
+
+# model = GT32dim_2_linear(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     use_edge_feature=True,
+# )
+
+# model = GT64dim(
+#     num_classes=len(class_values),
+#     regression=regression,
+#     use_edge_feature=True,
+# )
+
+# model = GT128dim_3_modes(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
+# model = GT128dim_3_modes_4_heads(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
+# model = GT128dim_3_modes_8_heads(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
+# model = GT128dim_3_modes_16_heads(
+#     num_classes=len(class_values),
+#     regression=regression,
+# )
+
 total_params = sum(p.numel() for param in model.parameters() for p in param)
-print(f'Total number of parameters is {total_params}')
+print(f'\nTotal number of parameters is {total_params}')
 print('model : ', model)
 
 train_epoch = 80
