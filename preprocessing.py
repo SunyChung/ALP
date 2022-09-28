@@ -26,9 +26,11 @@ def load_matlab_file(path_file, name_field):
 
 def load_ml_1m(dataset,
                u_wv_keys, v_wv_keys,
-               testing=False, rating_map=None, post_rating_map=None, ratio=1.0):
+               testing=False, rating_map=None, post_rating_map=None, ratio=1.0,
+               use_rating_dict=True
+               ):
     sep = r'\:\:'
-    filename = 'raw_data/' + dataset + '/ratings.dat'
+    filename = dataset + '/ratings.dat'
     dtypes = {
         'u_nodes': np.int64, 'v_nodes': np.int64,
         'ratings': np.float32, 'timestamp': np.float64}
@@ -44,13 +46,14 @@ def load_ml_1m(dataset,
     ratings = data_array[:, 2].astype(dtypes['ratings'])
     u_nodes, u_dict, num_users = map_data(u_nodes)
     v_nodes, v_dict, num_items = map_data(v_nodes)
+    print('number of users = ', num_users)
+    print('number of items = ', num_items)
     u_nodes, v_nodes = u_nodes.astype(np.int64), v_nodes.astype(np.int64)
     ratings = ratings.astype(np.float32)
 
     if rating_map is not None:
         for i, x in enumerate(ratings):
             ratings[i] = rating_map[x]
-    rating_dict = {r: i for i, r in enumerate(sorted(list(set(ratings))))}
 
     # number of test and validation edges
     num_test = int(np.ceil(ratings.shape[0] * 0.1))
@@ -91,8 +94,19 @@ def load_ml_1m(dataset,
     u_test_idx, v_test_idx = test_pairs_idx.transpose()
 
     # create labels
-    labels = np.full((num_users, num_items), -1, dtype=np.int32)
-    labels[u_nodes, v_nodes] = np.array([rating_dict[r] for r in ratings])
+    neutral_rating = -1  # int(np.ceil(np.float(num_classes)/2.)) - 1
+    labels = np.full((num_users, num_items), neutral_rating, dtype=np.int32)
+    if use_rating_dict:
+        rating_dict = {r: i for i, r in enumerate(sorted(list(set(ratings))))}
+        print('rating_dict : ', rating_dict)
+        # print('len(rating_dict) : ', len(rating_dict))
+        labels[u_nodes, v_nodes] = np.array([rating_dict[r] for r in ratings])
+        for i in range(len(u_nodes)):
+            assert (labels[u_nodes[i], v_nodes[i]] == rating_dict[ratings[i]])
+    else:
+        labels[u_nodes, v_nodes] = np.array([r for r in ratings])
+    labels = labels.reshape([-1])
+
     labels = labels.reshape([-1])
     train_labels = labels[idx_nonzero_train]
     val_labels = labels[idx_nonzero_val]
@@ -118,18 +132,20 @@ def load_ml_1m(dataset,
 
 def load_ml_100k(dataset,
                  u_wv_keys, v_wv_keys,
-                 testing=False, rating_map=None, post_rating_map=None, ratio=1.0):
+                 testing=False, rating_map=None, post_rating_map=None, ratio=1.0,
+                 use_rating_dict=True
+                 ):
     sep = '\t'
     # Check if files exist and download otherwise
     files = ['/u1.base', '/u1.test', '/u.item', '/u.user']
     fname = dataset
-    data_dir = 'raw_data/' + fname
-    download_dataset(fname, files, data_dir)
+    data_dir = fname
+    # download_dataset(fname, files, data_dir)
     dtypes = {
         'u_nodes': np.int32, 'v_nodes': np.int32,
         'ratings': np.float32, 'timestamp': np.float64}
-    filename_train = 'raw_data/' + dataset + '/u1.base'
-    filename_test = 'raw_data/' + dataset + '/u1.test'
+    filename_train = dataset + '/u1.base'
+    filename_test = dataset + '/u1.test'
 
     data_train = pd.read_csv(
         filename_train, sep=sep, header=None,
@@ -155,16 +171,22 @@ def load_ml_100k(dataset,
             ratings[i] = rating_map[x]
     u_nodes, u_dict, num_users = map_data(u_nodes)
     v_nodes, v_dict, num_items = map_data(v_nodes)
+    print('number of users = ', num_users)
+    print('number of items = ', num_items)
     u_nodes, v_nodes = u_nodes.astype(np.int64), v_nodes.astype(np.int32)
     ratings = ratings.astype(np.float64)
 
-    # assumes that ratings_train contains at least one example of every rating type
-    rating_dict = {r: i for i, r in enumerate(sorted(list(set(ratings))))}
     neutral_rating = -1  # int(np.ceil(np.float(num_classes)/2.)) - 1
     labels = np.full((num_users, num_items), neutral_rating, dtype=np.int32)
-    labels[u_nodes, v_nodes] = np.array([rating_dict[r] for r in ratings])
-    for i in range(len(u_nodes)):
-        assert (labels[u_nodes[i], v_nodes[i]] == rating_dict[ratings[i]])
+    if use_rating_dict:
+        rating_dict = {r: i for i, r in enumerate(sorted(list(set(ratings))))}
+        print('rating_dict : ', rating_dict)
+        # print('len(rating_dict) : ', len(rating_dict))
+        labels[u_nodes, v_nodes] = np.array([rating_dict[r] for r in ratings])
+        for i in range(len(u_nodes)):
+            assert (labels[u_nodes[i], v_nodes[i]] == rating_dict[ratings[i]])
+    else:
+        labels[u_nodes, v_nodes] = np.array([r for r in ratings])
     labels = labels.reshape([-1])
 
     # number of test and validation edges, see cf-nade code
@@ -175,8 +197,6 @@ def load_ml_100k(dataset,
 
     pairs_nonzero = np.array([[u, v] for u, v in zip(u_nodes, v_nodes)])
     idx_nonzero = np.array([u * num_items + v for u, v in pairs_nonzero])
-    for i in range(len(ratings)):
-        assert (labels[idx_nonzero[i]] == rating_dict[ratings[i]])
 
     # idx_nonzero_train = idx_nonzero[0:num_train + num_val]
     # idx_nonzero_test = idx_nonzero[num_train + num_val:]
@@ -247,28 +267,32 @@ def load_ml_100k(dataset,
 
 def load_data(dataset,
               u_wv_keys, v_wv_keys,
+              use_rating_dict,
               testing=False, rating_map=None, post_rating_map=None,
-              use_label=True):
-    path_dataset = 'raw_data/' + dataset + '/training_test_dataset.mat'
+              ):
+    path_dataset = dataset + '/training_test_dataset.mat'
     M = load_matlab_file(path_dataset, 'M')
     if rating_map is not None:
         M[np.where(M)] = [rating_map[x] for x in M[np.where(M)]]
+        
     Otraining = load_matlab_file(path_dataset, 'Otraining')
     Otest = load_matlab_file(path_dataset, 'Otest')
     num_users = M.shape[0]
     num_items = M.shape[1]
-    print('Otraining num_train : ', np.where(Otraining)[0].shape[0])
-    print('Otest num_test : ', np.where(Otest)[0].shape[0])
+    # print('Otraining num_train : ', np.where(Otraining)[0].shape[0])
+    # print('Otest num_test : ', np.where(Otest)[0].shape[0])
     u_nodes = np.where(M)[0].astype(np.int64)
     v_nodes = np.where(M)[1].astype(np.int64)
     ratings = M[np.where(M)].astype(np.float64)
     print('number of users = ', len(set(u_nodes)))
     print('number of item = ', len(set(v_nodes)))
 
-    rating_dict = {r: i for i, r in enumerate(sorted(list(set(ratings))))}
     neutral_rating = -1  # 0 maybe?
     labels = np.full((num_users, num_items), neutral_rating, dtype=np.int32)
-    if use_label:
+    if use_rating_dict:
+        rating_dict = {r: i for i, r in enumerate(sorted(list(set(ratings))))}
+        print('rating_dict : ', rating_dict)
+        # print('len(rating_dict) : ', len(rating_dict))
         labels[u_nodes, v_nodes] = np.array([rating_dict[r] for r in ratings])
     else:
         labels[u_nodes, v_nodes] = np.array([r for r in ratings])
@@ -298,9 +322,9 @@ def load_data(dataset,
     num_test = len(pairs_nonzero_test)
     num_val = int(np.ceil(num_train * 0.2))
     num_train = num_train - num_val
-    print('pairs nonzero num_train : ', num_train)
-    print('pairs nonzero num_test : ', num_test)
-    print('pairs nonzero num_val : ', num_val)
+    # print('pairs nonzero num_train : ', num_train)
+    # print('pairs nonzero num_test : ', num_test)
+    # print('pairs nonzero num_val : ', num_val)
 
     # Internally shuffle training set (before splitting off validation set)
     rand_idx = list(range(len(idx_nonzero_train)))
@@ -347,4 +371,4 @@ def load_data(dataset,
     rating_mx_train = sp.csr_matrix(rating_mx_train.reshape(num_users, num_items))
     return rating_mx_train, train_ratings, u_train_idx, v_train_idx, \
            val_ratings, u_val_idx, v_val_idx, test_ratings, u_test_idx, v_test_idx, \
-           class_values, rating_dict
+           class_values
