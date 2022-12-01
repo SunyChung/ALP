@@ -9,7 +9,7 @@ from torch_geometric.utils import dropout_adj
 import numpy as np
 
 
-class GT32dim_3_modes_6_dec_linear(nn.Module):
+class GT32dim_3_modes_3_layer(nn.Module):
     def __init__(self,
                  num_classes,
                  regression,
