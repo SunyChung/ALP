@@ -70,13 +70,24 @@ class SparseColIndexer:
 
 
 class DynamicFeatures(Dataset):
-    def __init__(self, root, A, links, labels,
-                 h, sample_ratio, max_nodes_per_hop,
+    def __init__(self,
+                 root,
+                 A,
+                 links,
+                 labels,
+                 h,
+                 sample_ratio,
+                 max_nodes_per_hop,
                  regression,
-                 u_features, v_features, u_dict, v_dict, class_values,
+                 u_features, v_features,
+                 u_dict, v_dict,
+                 class_values,
+                 emb_dim,
                  use_edge_feature=True,
-                 max_num=None):
+                 max_num=None
+                 ):
         super(DynamicFeatures, self).__init__(root)
+
         self.Arow = SparseRowIndexer(A)
         self.Acol = SparseColIndexer(A.tocsc())
         self.links = links
@@ -90,6 +101,7 @@ class DynamicFeatures(Dataset):
         self.u_dict = u_dict
         self.v_dict = v_dict
         self.class_values = class_values
+        self.emb_dim = emb_dim
         self.use_edge_feature = use_edge_feature
         if max_num is not None:
             np.random.seed(123)
@@ -107,20 +119,32 @@ class DynamicFeatures(Dataset):
         g_label = self.labels[idx]
 
         tmp = subgraph_features(
-            (i, j), self.Arow, self.Acol,
+            (i, j),
+            self.Arow,
+            self.Acol,
             self.regression,
             self.u_features, self.v_features, self.u_dict, self.v_dict,
-            self.h, self.sample_ratio, self.max_nodes_per_hop,
-            self.class_values, g_label
+            self.h,
+            self.sample_ratio,
+            self.max_nodes_per_hop,
+            self.class_values,
+            g_label
         )
-        # return construct_pyg_features(*tmp)
-        return construct_pyg_data(*tmp)
+        return construct_pyg_features(*tmp)
+        # return construct_pyg_data(*tmp)  # for inter edge index direction testing
 
-def subgraph_features(ind, Arow, Acol,
-                       regression,
-                       u_features, v_features, u_dict, v_dict,
-                       h=1, sample_ratio=1.0, max_nodes_per_hop=None,
-                       class_values=None, y=1):
+def subgraph_features(ind,
+                      Arow,
+                      Acol,
+                      regression,
+                      u_features, v_features, u_dict, v_dict,
+                      h=1,
+                      sample_ratio=1.0,
+                      max_nodes_per_hop=None,
+                      class_values=None,
+                      y=1
+                      ):
+
     u_nodes, v_nodes = [ind[0]], [ind[1]]
     u_visited, v_visited = {ind[0]}, {ind[1]}
     u_fringe, v_fringe = {ind[0]}, {ind[1]}
@@ -145,41 +169,39 @@ def subgraph_features(ind, Arow, Acol,
 
     subgraph = Arow[u_nodes][:, v_nodes]
     subgraph[0, 0] = 0
-
     u, v, r = ssp.find(subgraph)
     r = r - 1
     y = class_values[y]
 
     # extract embedding vector using u_nodes index !
     u_node_indices = np.array(u_nodes)[u]
-    u_emb_indices = torch.LongTensor([u_dict[i] for i in u_node_indices])
-    sub_u_emb = u_features(u_emb_indices)
+    u_emb_indices = [u_dict[i] for i in u_node_indices]
+    sub_u_emb = u_features[u_emb_indices]
     target_u_index = np.array(u_nodes)[0]
-    target_u_emb = u_features(torch.LongTensor([u_dict[target_u_index]]))
+    target_u_emb = u_features[u_dict[target_u_index]]
 
     v_node_indices = np.array(v_nodes)[v]
-    v_emb_indices = torch.LongTensor([v_dict[j] for j in v_node_indices])
-    sub_v_emb = v_features(v_emb_indices)
+    v_emb_indices = [v_dict[j] for j in v_node_indices]
+    sub_v_emb = v_features[v_emb_indices]
     target_v_index = np.array(v_nodes)[0]
-    target_v_emb = v_features(torch.LongTensor([v_dict[target_v_index]]))
+    target_v_emb = v_features[v_dict[target_v_index]]
 
-    uv_emb = np.vstack((sub_u_emb, sub_v_emb))
-    vu_emb = np.vstack((sub_v_emb, sub_u_emb))
+    uv_emb = torch.cat((sub_u_emb, sub_v_emb), 0)
+    vu_emb = torch.cat((sub_v_emb, sub_u_emb), 0)
 
-    u_target_emb = np.tile(target_u_emb, (len(sub_u_emb), 1))
-    v_target_emb = np.tile(target_v_emb, (len(sub_v_emb), 1))
-    uv_target_emb = np.vstack((u_target_emb, v_target_emb))
+    u_target_emb = torch.tile(target_u_emb, (len(sub_u_emb), 1))
+    v_target_emb = torch.tile(target_v_emb, (len(sub_v_emb), 1))
+    uv_target_emb = torch.cat((u_target_emb, v_target_emb), 0)
     return u, v, r, y, uv_emb, vu_emb, uv_target_emb, regression
 
 
-def construct_pyg_features(u, v, r, y,
-                           uv_emb, vu_emb, uv_target_emb, regression):
+def construct_pyg_features(u, v, r, y, uv_emb, vu_emb, uv_target_emb, regression):
     u, v = torch.LongTensor(u), torch.LongTensor(v)
     r = torch.FloatTensor(r)
     edge_attr = torch.cat([r, r])
 
     inter_index = torch.cat([torch.stack([u, v], dim=0), torch.stack([v, u], dim=0)], 1)
-    inter_emb = torch.FloatTensor(np.concatenate((uv_emb, vu_emb), 1))
+    inter_emb = torch.cat((uv_emb, vu_emb), 1)
 
     u_target_index = torch.stack([u, torch.zeros_like(u)], dim=0)
     v_target_index = torch.stack([v, torch.zeros_like(v)], dim=0)
@@ -189,7 +211,7 @@ def construct_pyg_features(u, v, r, y,
     target_v_index = torch.stack([torch.zeros_like(v), v], dim=0)
     target_uv_intra_index = torch.cat([target_u_index, target_v_index], 1)
 
-    uv_target_intra_emb = torch.FloatTensor(uv_target_emb)
+    uv_target_intra_emb = uv_target_emb
 
     if regression:
         y = torch.FloatTensor([y])  # for regression
@@ -201,37 +223,6 @@ def construct_pyg_features(u, v, r, y,
                 uv_target_index=uv_target_intra_index, uv_target_emb=uv_target_intra_emb,
                 target_uv_index=target_uv_intra_index)
     # data.num_nodes = len(inter_index)
-    return data
-
-
-def construct_pyg_data(u, v, r, y, uv_emb, vu_emb, uv_target_emb, regression):
-    u, v = torch.LongTensor(u), torch.LongTensor(v)
-    r = torch.FloatTensor(r)
-    edge_attr = torch.cat([r, r], 0)
-
-    # changed the edge index direction for j to i feature aggregation
-    # however, this provision doesn't affect the performance...
-    inter_index = torch.cat([torch.stack([v, u], dim=0), torch.stack([u, v], dim=0)], 1)
-    inter_emb = torch.FloatTensor(np.concatenate((vu_emb, uv_emb), 1))
-
-    u_target_index = torch.stack([u, torch.zeros_like(u)], dim=0)
-    v_target_index = torch.stack([v, torch.zeros_like(v)], dim=0)
-    uv_target_intra_index = torch.cat([u_target_index, v_target_index], 1)
-
-    target_u_index = torch.stack([torch.zeros_like(u), u], dim=0)
-    target_v_index = torch.stack([torch.zeros_like(v), v], dim=0)
-    target_uv_intra_index = torch.cat([target_u_index, target_v_index], 1)
-
-    uv_target_intra_emb = torch.FloatTensor(uv_target_emb)
-
-    if regression:
-        y = torch.FloatTensor([y])  # for regression
-    else:
-        y = torch.LongTensor([y])  # for classification
-
-    data = Data(x=inter_emb, edge_index=inter_index, edge_attr=edge_attr, y=y,
-                uv_target_index=uv_target_intra_index, uv_target_emb=uv_target_intra_emb,
-                target_uv_index=target_uv_intra_index)
     return data
 
 
