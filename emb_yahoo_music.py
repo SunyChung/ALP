@@ -22,6 +22,39 @@ def load_matlab_file(path_file, name_field):
     return out
 
 
+def make_edgelist(M):
+    row, col = M.nonzero()
+    print('unique row # : ', len(np.unique(row)))  # 1357
+    print('unique col # : ', len(np.unique(col)))  # 1363
+    # np.unique(row)  # len(np.unique(row)) # 1357 -> emb : 1322
+    # array([   1,    3,    5, ..., 2995, 2996, 2997])
+    # np.unique(col)  # len(np.unique(col)) # 1363 -> emb : 1335
+    # array([   0,    1,    2, ..., 2996, 2998, 2999])
+    # len(row) # 5335,  # len(col) # 5335
+    # np.max(row) # 2997  # np.max(col) # 2999
+    col = col + 10000
+    B = nx.Graph()
+    B.add_nodes_from(row, bipartite=0)
+    B.add_nodes_from(col, bipartite=1)
+    bi_tuples = []
+    for i in range(len(row)):
+        bi_tuples.append((row[i], col[i]))
+    B.add_edges_from(bi_tuples)
+    top_nodes = {n for n, d in B.nodes(data=True) if d["bipartite"] == 0}
+    bottom_nodes = B.nodes - top_nodes
+    top_proj = nx.bipartite.projected_graph(B, top_nodes)
+    bottom_proj = nx.bipartite.projected_graph(B, bottom_nodes)
+    # top_proj = nx.bipartite.projected_graph(B, top_nodes, multigraph=True)
+    # bottom_proj = nx.bipartite.projected_graph(B, bottom_nodes, multigraph=True)
+    # top_p_edges = list(top_proj.edges())
+    # bot_p_edges = list(bottom_proj.edges())
+    # home = os.path.expanduser('~')
+    # data_dir = os.path.join(home, 'attention/attended_prediction/raw_data')
+    # nx.write_edgelist(top_p_edges, os.path.join(data_dir, 'yahoo_music/top.edgelist'))
+    # nx.write_edgelist(bot_p_edges, os.path.join(data_dir, 'yahoo_music/bottom.edgelist'))
+    return top_proj, bottom_proj
+
+
 def make_weighted_edgelist(M):
     row, col = M.nonzero()
     print('unique row # : ', len(np.unique(row)))  # 1357
@@ -41,34 +74,12 @@ def make_weighted_edgelist(M):
     return top_proj, bottom_proj
 
 
-def weighted_sum(M, index):
-    total_indices = []
-    total_rating_weights = []
-    zero_indices = []
-    nonzero_indices = []
-    for i in range(M.shape[index]):
-        if M[i].sum() == 0:
-            zero_indices.append(i)
-            continue
-        else:
-            nonzero_indices.append(i)
-            per_indices = []
-            per_rating_weights = []
-            for j in M[i].nonzero()[0]:
-                per_indices.append(j)
-                per_rating_weights.append(M[i][j])
-            row_weights = np.array(per_rating_weights) / M[i].sum()
-            total_indices.append(per_indices)
-            total_rating_weights.append(row_weights)
-    return total_indices, total_rating_weights, zero_indices, nonzero_indices
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PycanPy node embedding')
     # parser.add_argument('--dimensions', type=int, default=128,
     # parser.add_argument('--dimensions', type=int, default=64,
-    # parser.add_argument('--dimensions', type=int, default=32,
-    parser.add_argument('--dimensions', type=int, default=16,
+    parser.add_argument('--dimensions', type=int, default=32,
+    # parser.add_argument('--dimensions', type=int, default=16,
                         help='number of dimensions. default is 128')
     # parser.add_argument('--walk-length', type=int, default=180,
     # parser.add_argument('--walk-length', type=int, default=160,
@@ -115,19 +126,30 @@ if __name__ == '__main__':
     print('embed dim. : ', args.dimensions)
 
     home = os.path.expanduser('~')
-    data_dir = os.path.join(home, 'link_prediction/ALP/raw_data')
+    data_dir = os.path.join(home, 'ALP')
+    raw_data_dir = os.path.join(data_dir, 'raw_data')
+    yahoo_dir = os.path.join(raw_data_dir, 'yahoo')
+    yahoo_M = load_matlab_file(os.path.join(yahoo_dir, 'training_test_dataset.mat'), 'M')
 
-    yahoo_dir = os.path.join(data_dir, 'yahoo_music/training_test_dataset.mat')
-    yahoo_M = load_matlab_file(yahoo_dir, 'M')
+    yahoo_edge_dir = os.path.join(yahoo_dir, 'yahoo_edge')
+    if not os.path.exists(yahoo_edge_dir):
+        os.makedirs(yahoo_edge_dir)
+    # top_proj, bottom_proj = make_edgelist(yahoo_M)
+    # nx.write_edgelist(top_proj, os.path.join(yahoo_dir, 'top.edgelist'), data=False)
+    # nx.write_edgelist(bottom_proj, os.path.join(yahoo_dir, 'btm.edgelist'), data=False)
     top_proj, bottom_proj = make_weighted_edgelist(yahoo_M)
-    nx.write_edgelist(top_proj, os.path.join(data_dir, 'yahoo_music/top_weighted.edgelist'), data=["weight"])
-    nx.write_edgelist(bottom_proj, os.path.join(data_dir, 'yahoo_music/btm_weighted.edgelist'), data=["weight"])
+    # nx.write_edgelist(top_proj, os.path.join(yahoo_dir, 'top_weighted.edgelist'), data=False)
+    # nx.write_edgelist(bottom_proj, os.path.join(yahoo_dir, 'btm_weighted.edgelist'), data=False)
+    nx.write_edgelist(top_proj, os.path.join(yahoo_edge_dir, 'top_weighted.edgelist'), data=["weight"])
+    nx.write_edgelist(bottom_proj, os.path.join(yahoo_edge_dir, 'btm_weighted.edgelist'), data=["weight"])
 
-    yahoo_emb_dir = os.path.join(data_dir, 'yahoo_music/emb')
+    yahoo_emb_dir = os.path.join(yahoo_dir, 'yahoo_emb')
     if not os.path.exists(yahoo_emb_dir):
         os.makedirs(yahoo_emb_dir)
-    top_dir = os.path.join(data_dir, 'yahoo_music/top_weighted.edgelist')
-    btm_dir = os.path.join(data_dir, 'yahoo_music/btm_weighted.edgelist')
+    # top_dir = os.path.join(yahoo_dir, 'top.edgelist')
+    # btm_dir = os.path.join(yahoo_dir, 'btm.edgelist')
+    top_dir = os.path.join(yahoo_edge_dir, 'top_weighted.edgelist')
+    btm_dir = os.path.join(yahoo_edge_dir, 'btm_weighted.edgelist')
     top_emb_dir = os.path.join(yahoo_emb_dir, 'weighted_top_' +
                                'dim_' + str(args.dimensions) +
                                '_walklen_' + str(args.walk_length) +
@@ -142,14 +164,15 @@ if __name__ == '__main__':
                                '.wv')
 
     yahoo_g = node2vec.PreComp(p=args.p, q=args.q, workers=args.workers, verbose=True)
+    # yahoo_g.read_edg(top_dir, weighted=False, directed=False, delimiter=" ")
     yahoo_g.read_edg(top_dir, weighted=True, directed=False, delimiter=" ")
     yahoo_g.preprocess_transition_probs()
     top_walks = yahoo_g.simulate_walks(num_walks=args.num_walks, walk_length=args.walk_length)
-    # embed() returns w2v.wv
+    # embed()s return w2v.wv
     top_wv = yahoo_g.embed(dim=args.dimensions,
                            num_walks=args.num_walks,
                            walk_length=args.walk_length,
-                           window_size=args.window_size)
+                           window_size=args.window_size)  # changed the return value of 'embed()'
     top_wv.save(top_emb_dir)
 
     yahoo_g.read_edg(btm_dir, weighted=False, directed=False, delimiter=" ")
@@ -161,3 +184,12 @@ if __name__ == '__main__':
                            window_size=args.window_size)
     btm_wv.save(btm_emb_dir)
     print('embdding vector saved!')
+
+    # loading test
+    import torch
+    import torch.nn as nn
+    from gensim.models import KeyedVectors
+    top_wv_ = KeyedVectors.load(top_emb_dir)
+    # KeyError: "Key '1322' not present"
+    # 이 에러는 왜 ?! nn.Embedding 사이즈를 더 크게 잡으면 되나 ?!
+    top_emb = nn.Embedding.from_pretrained(torch.FloatTensor(top_wv_))
