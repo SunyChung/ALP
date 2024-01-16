@@ -1,12 +1,11 @@
 from shutil import rmtree
 from gensim.models import KeyedVectors
 
-from graph_util import DynamicFeatures
+from graph_utils import DynamicFeatures
 from preprocessing import *
-from train_eval import *
+from train_eval import train_multiple_epochs
 
-from models.model_32 import *
-from model_2_modes_3_layers import GT32dim_2_modes_3_layers
+from model_2_modes_3_layers import *
 
 
 torch.manual_seed(seed=1)
@@ -15,17 +14,17 @@ if torch.cuda.is_available():
 random.seed(1)
 np.random.seed(1)
 
-data_name = 'yahoo_music'
+# data_name = 'yahoo'
 # data_name = 'flixster'
 # data_name = 'douban'
 # data_name = 'ml_100k'
-# data_name = 'ml_1m'
+data_name = 'ml_1m'
 # max_nodes_per_hop = 500 도 안 되면 어쩌라는 건지 -_
 # 결국 max_nodes_per_hop = 100 으로 ;;
 
 print('Using ' + data_name + ' dataset ...')
 home = os.path.expanduser('~')
-data_root = os.path.join(home, 'link_prediction/ALP/raw_data/')
+data_root = os.path.join(home, 'ALP/raw_data/')
 data_dir = data_root + data_name
 
 # max_nodes_per_hop = 100
@@ -39,25 +38,30 @@ print('node embedding loading from ', data_name)
 walk_length = 80
 num_walks = 10
 window_size = 10
-# dimensions = 32
-dimensions = 16
-top_wv = KeyedVectors.load(os.path.join(data_dir,
-                                           'emb/weighted_top_dim_' + str(dimensions) +
+dimensions = 32
+# dimensions = 16
+emb_dir = os.path.join(data_dir, data_name + '_emb')
+
+top_wv = KeyedVectors.load(os.path.join(emb_dir,
+                                           'weighted_top_dim_' + str(dimensions) +
                                            '_walklen_80_num_walks_10_window_10.wv'))
-btm_wv = KeyedVectors.load(os.path.join(data_dir,
-                                           'emb/weighted_btm_dim_' + str(dimensions) +
+btm_wv = KeyedVectors.load(os.path.join(emb_dir,
+                                           'weighted_btm_dim_' + str(dimensions) +
                                            '_walklen_80_num_walks_10_window_10.wv'))
 
 top_emb = nn.Embedding.from_pretrained(torch.FloatTensor(top_wv.vectors))
 btm_emb = nn.Embedding.from_pretrained(torch.FloatTensor(btm_wv.vectors))
-top_avg = torch.mean(top_emb.weight, dim=0)
-btm_avg = torch.mean(btm_emb.weight, dim=0)
-top_avg_expand = torch.tile(top_avg, (top_emb.weight.shape[0], 1))
-btm_avg_expand = torch.tile(btm_avg, (btm_emb.weight.shape[0], 1))
-top_concat = torch.concat((top_avg_expand, top_emb.weight), 1)
-btm_concat = torch.concat((btm_avg_expand, btm_emb.weight), 1)
 
-u_emb, v_emb = top_concat, btm_concat
+# 근데, 왜 평균값을 더했었나... 여기서 avt_expand 더해서 layer 에서 차원 안 맞았음..
+# top_avg = torch.mean(top_emb.weight, dim=0)
+# btm_avg = torch.mean(btm_emb.weight, dim=0)
+# top_avg_expand = torch.tile(top_avg, (top_emb.weight.shape[0], 1))
+# btm_avg_expand = torch.tile(btm_avg, (btm_emb.weight.shape[0], 1))
+# top_concat = torch.concat((top_avg_expand, top_emb.weight), 1)
+# btm_concat = torch.concat((btm_avg_expand, btm_emb.weight), 1)
+# u_emb, v_emb = top_concat, btm_concat
+
+u_emb, v_emb = top_emb.weight, btm_emb.weight
 u_dict, v_dict = top_wv.key_to_index, btm_wv.key_to_index
 re_u_dict = {}
 for k, v in u_dict.items():
@@ -74,7 +78,7 @@ use_rating_dict = True
 # use rating_dict only for classification since it needs continuous class range
 print('\nusing re-mapped rating dictionary? ', use_rating_dict)
 
-if data_name in ['yahoo_music', 'flixster', 'douban']:
+if data_name in ['yahoo', 'flixster', 'douban']:
     (
         adj_train,
         train_labels, train_u_indices, train_v_indices,
@@ -233,10 +237,10 @@ print('model : ', model)
 # train_epoch = 80
 train_epoch = 100
 # MUST FIX the batch size RuntimeError !!
-# batch = 40
-# batch = 50
+# batch = 10
+batch = 50
 # batch = 60
-batch = 100
+# batch = 100
 print('batch size : ', batch)
 
 train_multiple_epochs(
